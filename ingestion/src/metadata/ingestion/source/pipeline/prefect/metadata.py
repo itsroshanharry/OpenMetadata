@@ -453,14 +453,13 @@ class PrefectSource(PipelineServiceSource):
 
     def test_connection(self) -> None:
         """
-        Test connection - temporarily disabled until backend is updated.
-        The connection will be tested when fetching flows.
+        Test connection to Prefect Cloud API.
+        Validates API key, account ID, and workspace ID by attempting to fetch flows.
         """
-        # TODO: Re-enable once backend has Prefect test connection definition
-        # from metadata.ingestion.source.pipeline.prefect.connection import test_connection
-        # test_connection(
-        #     self.metadata,
-        #     self.http_client,
-        #     self.service_connection,
-        # )
-        pass
+        from metadata.ingestion.source.pipeline.prefect.connection import test_connection
+        
+        test_connection(
+            self.metadata,
+            self.http_client,
+            self.service_connection,
+        )
