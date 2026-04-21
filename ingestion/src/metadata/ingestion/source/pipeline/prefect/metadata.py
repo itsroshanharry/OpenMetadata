@@ -67,9 +67,10 @@ class PrefectSource(PipelineServiceSource):
             config.serviceConnection.root.config
         )
         
-        # Build the Prefect Cloud API base URL
+        # Build the Prefect API base URL using hostPort from config
+        host = getattr(self.service_connection, 'hostPort', None) or "https://api.prefect.cloud"
         self.base_url = (
-            f"https://api.prefect.cloud/api/accounts"
+            f"{host}/api/accounts"
             f"/{self.service_connection.accountId}"
             f"/workspaces/{self.service_connection.workspaceId}"
         )
@@ -84,10 +85,11 @@ class PrefectSource(PipelineServiceSource):
         self.headers = {
             "Authorization": f"Bearer {api_key_str}",
             "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            "User-Agent": "OpenMetadata/Prefect-Connector"
         }
-        # Don't set headers on client - pass them with each request instead
-        self.http_client = httpx.Client(timeout=30)
+        
+        # Cache for deployments to avoid duplicate API calls
+        self._deployments_cache = {}
         
         # Now call parent __init__ which will call test_connection()
         super().__init__(config, metadata)
@@ -109,13 +111,23 @@ class PrefectSource(PipelineServiceSource):
         """Fetch all flows from Prefect Cloud using POST /flows/filter."""
         try:
             # Prefect API has a maximum limit of 200 per request
-            response = self.http_client.post(
+            response = self.connection.post(
                 f"{self.base_url}/flows/filter",
                 headers=self.headers,
                 json={"limit": 200, "offset": 0}
             )
             response.raise_for_status()
-            return response.json()
+            flows = response.json()
+            
+            # Warn if we hit the limit (possible truncation)
+            if len(flows) >= 200:
+                logger.warning(
+                    "Prefect API returned 200 flows (the maximum per request). "
+                    "Some flows may not be ingested. Pagination support is "
+                    "planned for a future release."
+                )
+            
+            return flows
         except Exception as exc:
             logger.error(f"Failed to fetch flows: {exc}")
             return []
@@ -124,7 +136,7 @@ class PrefectSource(PipelineServiceSource):
         """Fetch recent run history for a specific flow."""
         try:
             limit = getattr(self.service_connection, "numberOfStatus", 10)
-            response = self.http_client.post(
+            response = self.connection.post(
                 f"{self.base_url}/flow_runs/filter",
                 headers=self.headers,
                 json={
@@ -140,9 +152,13 @@ class PrefectSource(PipelineServiceSource):
             return []
 
     def _get_deployments(self, flow_id: str) -> List[dict]:
-        """Fetch deployments for a specific flow."""
+        """Fetch deployments for a specific flow (with caching)."""
+        # Check cache first to avoid duplicate API calls
+        if flow_id in self._deployments_cache:
+            return self._deployments_cache[flow_id]
+        
         try:
-            response = self.http_client.post(
+            response = self.connection.post(
                 f"{self.base_url}/deployments/filter",
                 headers=self.headers,
                 json={
@@ -167,6 +183,8 @@ class PrefectSource(PipelineServiceSource):
                     f"filtered to {len(filtered)} for flow {flow_id}"
                 )
             
+            # Cache the result
+            self._deployments_cache[flow_id] = filtered
             return filtered
         except Exception as exc:
             logger.warning(f"Failed to fetch deployments for flow {flow_id}: {exc}")
@@ -229,7 +247,7 @@ class PrefectSource(PipelineServiceSource):
         """Convert Prefect flow runs to OpenMetadata PipelineStatus."""
         from datetime import datetime
         
-        def parse_timestamp(ts_str: str) -> int:
+        def parse_timestamp(ts_str: str) -> Optional[int]:
             """Convert ISO timestamp string to Unix timestamp (milliseconds)."""
             if not ts_str:
                 return None
@@ -449,7 +467,9 @@ class PrefectSource(PipelineServiceSource):
         return pipeline_details["name"]
 
     def close(self):
-        self.http_client.close()
+        """Close the HTTP client connection."""
+        if hasattr(self, 'connection') and self.connection:
+            self.connection.close()
 
     def test_connection(self) -> None:
         """
@@ -460,6 +480,8 @@ class PrefectSource(PipelineServiceSource):
         
         test_connection(
             self.metadata,
-            self.http_client,
+            self.connection,
             self.service_connection,
+            self.base_url,
+            self.headers,
         )

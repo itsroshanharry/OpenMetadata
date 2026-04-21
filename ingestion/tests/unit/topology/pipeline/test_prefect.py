@@ -78,16 +78,26 @@ class TestPrefectSource(unittest.TestCase):
         }
         
         self.mock_metadata = Mock()
+        # Mock test connection definition to prevent test_connection from failing during init
+        mock_test_def = Mock()
+        mock_test_def.steps = []
+        self.mock_metadata.get_by_name.return_value = mock_test_def
+        
         self.workflow_config = WorkflowSource.model_validate(self.config["source"])
 
-    @patch("metadata.ingestion.source.pipeline.prefect.metadata.httpx.Client")
-    def test_get_flows(self, mock_client):
+    @patch("metadata.ingestion.source.pipeline.pipeline_service.PipelineServiceSource.test_connection")
+    @patch("metadata.ingestion.source.pipeline.prefect.connection.get_connection")
+    def test_get_flows(self, mock_get_connection, mock_test_conn):
         """Test fetching flows from Prefect API."""
         # Mock HTTP response
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = MOCK_FLOWS
-        mock_client.return_value.post.return_value = mock_response
+        
+        # Mock the connection client
+        mock_client = Mock()
+        mock_client.post.return_value = mock_response
+        mock_get_connection.return_value = mock_client
         
         source = PrefectSource(self.workflow_config, self.mock_metadata)
         flows = source.get_pipelines_list()
@@ -96,14 +106,19 @@ class TestPrefectSource(unittest.TestCase):
         self.assertEqual(flows[0]["name"], "test-flow")
         self.assertEqual(flows[1]["name"], "etl-pipeline")
 
-    @patch("metadata.ingestion.source.pipeline.prefect.metadata.httpx.Client")
-    def test_yield_pipeline(self, mock_client):
+    @patch("metadata.ingestion.source.pipeline.pipeline_service.PipelineServiceSource.test_connection")
+    @patch("metadata.ingestion.source.pipeline.prefect.connection.get_connection")
+    def test_yield_pipeline(self, mock_get_connection, mock_test_conn):
         """Test pipeline entity creation from Prefect flow."""
         # Mock deployments response
         mock_dep_response = Mock()
         mock_dep_response.status_code = 200
         mock_dep_response.json.return_value = MOCK_DEPLOYMENTS
-        mock_client.return_value.post.return_value = mock_dep_response
+        
+        # Mock the connection client
+        mock_client = Mock()
+        mock_client.post.return_value = mock_dep_response
+        mock_get_connection.return_value = mock_client
         
         source = PrefectSource(self.workflow_config, self.mock_metadata)
         source.context.get = Mock(return_value=Mock(pipeline_service="test_prefect"))
@@ -125,14 +140,19 @@ class TestPrefectSource(unittest.TestCase):
         self.assertEqual(tag.labelType, LabelType.Automated)
         self.assertEqual(tag.state, State.Suggested)
 
-    @patch("metadata.ingestion.source.pipeline.prefect.metadata.httpx.Client")
-    def test_yield_pipeline_status(self, mock_client):
+    @patch("metadata.ingestion.source.pipeline.pipeline_service.PipelineServiceSource.test_connection")
+    @patch("metadata.ingestion.source.pipeline.prefect.connection.get_connection")
+    def test_yield_pipeline_status(self, mock_get_connection, mock_test_conn):
         """Test flow run status conversion."""
         # Mock flow runs response
         mock_runs_response = Mock()
         mock_runs_response.status_code = 200
         mock_runs_response.json.return_value = MOCK_FLOW_RUNS
-        mock_client.return_value.post.return_value = mock_runs_response
+        
+        # Mock the connection client
+        mock_client = Mock()
+        mock_client.post.return_value = mock_runs_response
+        mock_get_connection.return_value = mock_client
         
         source = PrefectSource(self.workflow_config, self.mock_metadata)
         
@@ -152,8 +172,14 @@ class TestPrefectSource(unittest.TestCase):
         status2 = results[1].right
         self.assertEqual(status2.executionStatus.value, "Failed")
 
-    def test_parse_lineage_from_tags(self):
+    @patch("metadata.ingestion.source.pipeline.pipeline_service.PipelineServiceSource.test_connection")
+    @patch("metadata.ingestion.source.pipeline.prefect.connection.get_connection")
+    def test_parse_lineage_from_tags(self, mock_get_connection, mock_test_conn):
         """Test lineage detection from tags with both prefixed and legacy formats."""
+        # Mock the connection client
+        mock_client = Mock()
+        mock_get_connection.return_value = mock_client
+        
         source = PrefectSource(self.workflow_config, self.mock_metadata)
         
         # Test with prefixed format (recommended)
@@ -215,8 +241,14 @@ class TestPrefectSource(unittest.TestCase):
         # Should only have one unique source
         self.assertEqual(len(sources), 1)
 
-    def test_get_all_tags(self):
+    @patch("metadata.ingestion.source.pipeline.pipeline_service.PipelineServiceSource.test_connection")
+    @patch("metadata.ingestion.source.pipeline.prefect.connection.get_connection")
+    def test_get_all_tags(self, mock_get_connection, mock_test_conn):
         """Test tag collection from flow and deployments."""
+        # Mock the connection client
+        mock_client = Mock()
+        mock_get_connection.return_value = mock_client
+        
         source = PrefectSource(self.workflow_config, self.mock_metadata)
         
         flow = {"tags": ["flow-tag1", "flow-tag2"]}
@@ -232,8 +264,14 @@ class TestPrefectSource(unittest.TestCase):
         self.assertIn("dep-tag1", all_tags)
         self.assertIn("dep-tag3", all_tags)
 
-    def test_get_pipeline_name(self):
+    @patch("metadata.ingestion.source.pipeline.pipeline_service.PipelineServiceSource.test_connection")
+    @patch("metadata.ingestion.source.pipeline.prefect.connection.get_connection")
+    def test_get_pipeline_name(self, mock_get_connection, mock_test_conn):
         """Test pipeline name extraction."""
+        # Mock the connection client
+        mock_client = Mock()
+        mock_get_connection.return_value = mock_client
+        
         source = PrefectSource(self.workflow_config, self.mock_metadata)
         
         name = source.get_pipeline_name(MOCK_FLOWS[0])

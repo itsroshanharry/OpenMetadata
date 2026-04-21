@@ -24,14 +24,18 @@ def get_connection(connection: PrefectConnection) -> httpx.Client:
     else:
         api_key_str = str(api_key)
     
+    # Use hostPort from config or default to Prefect Cloud
+    host = getattr(connection, 'hostPort', None) or "https://api.prefect.cloud"
     base_url = (
-        f"https://api.prefect.cloud/api/accounts"
+        f"{host}/api/accounts"
         f"/{connection.accountId}"
         f"/workspaces/{connection.workspaceId}"
     )
+    
     headers = {
         "Authorization": f"Bearer {api_key_str}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "User-Agent": "OpenMetadata/Prefect-Connector"
     }
     return httpx.Client(base_url=base_url, headers=headers, timeout=30)
 
@@ -40,6 +44,8 @@ def test_connection(
     metadata: OpenMetadata,
     client: httpx.Client,
     service_connection: PrefectConnection,
+    base_url: str = None,
+    headers: dict = None,
     automation_workflow: AutomationWorkflow = None,
 ) -> None:
     """
@@ -48,15 +54,14 @@ def test_connection(
 
     def custom_test_connection(client: httpx.Client) -> None:
         # Test using POST /flows/filter as per Prefect 3.x API
-        base_url = (
-            f"https://api.prefect.cloud/api/accounts"
-            f"/{service_connection.accountId}"
-            f"/workspaces/{service_connection.workspaceId}"
-        )
-        response = client.post(
-            f"{base_url}/flows/filter",
-            json={"limit": 1, "offset": 0}
-        )
+        # Use provided base_url and headers if available (from metadata.py)
+        # Otherwise construct them (when called from get_connection)
+        if base_url and headers:
+            url = f"{base_url}/flows/filter"
+            response = client.post(url, headers=headers, json={"limit": 1, "offset": 0})
+        else:
+            # Fallback: client already has base_url and headers configured
+            response = client.post("/flows/filter", json={"limit": 1, "offset": 0})
         response.raise_for_status()
 
     test_fn = {"GetFlows": custom_test_connection}
