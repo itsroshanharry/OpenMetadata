@@ -1,0 +1,57 @@
+{
+  "$id": "https://open-metadata.org/schema/entity/services/connections/pipeline/prefectConnection.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PrefectConnection",
+  "description": "Prefect Metadata Database Connection Config",
+  "javaType": "org.openmetadata.schema.services.connections.pipeline.PrefectConnection",
+  "definitions": {
+    "prefectType": {
+      "description": "Service type.",
+      "type": "string",
+      "enum": ["Prefect"],
+      "default": "Prefect"
+    }
+  },
+  "properties": {
+    "type": {
+      "title": "Service Type",
+      "description": "Service Type",
+      "$ref": "#/definitions/prefectType",
+      "default": "Prefect"
+    },
+    "apiKey": {
+      "title": "Prefect API Key",
+      "description": "Prefect Cloud API key for authentication.",
+      "type": "string",
+      "password": true
+    },
+    "accountId": {
+      "title": "Account ID",
+      "description": "Prefect Cloud Account ID. Found in the URL: app.prefect.cloud/account/{accountId}",
+      "type": "string"
+    },
+    "workspaceId": {
+      "title": "Workspace ID",
+      "description": "Prefect Cloud Workspace ID. Found in the URL after /workspaces/{workspaceId}",
+      "type": "string"
+    },
+    "hostPort": {
+      "title": "Host and Port",
+      "description": "Prefect Cloud API base URL.",
+      "type": "string",
+      "default": "https://api.prefect.cloud"
+    },
+    "numberOfStatus": {
+      "title": "Number of Status",
+      "description": "Number of past flow run statuses to ingest per flow.",
+      "type": "integer",
+      "default": 10
+    },
+    "supportsMetadataExtraction": {
+      "title": "Supports Metadata Extraction",
+      "$ref": "../connectionBasicType.json#/definitions/supportsMetadataExtraction"
+    }
+  },
+  "additionalProperties": false,
+  "required": ["apiKey", "accountId", "workspaceId"]
+}
