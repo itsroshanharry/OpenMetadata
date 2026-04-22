@@ -27,17 +27,17 @@
     },
     "accountId": {
       "title": "Account ID",
-      "description": "Prefect Cloud Account ID. Found in the URL: app.prefect.cloud/account/{accountId}",
+      "description": "Prefect Cloud Account ID (required for Prefect Cloud). Found in the URL: app.prefect.cloud/account/{accountId}. Leave empty for self-hosted Prefect Server.",
       "type": "string"
     },
     "workspaceId": {
       "title": "Workspace ID",
-      "description": "Prefect Cloud Workspace ID. Found in the URL after /workspaces/{workspaceId}",
+      "description": "Prefect Cloud Workspace ID (required for Prefect Cloud). Found in the URL after /workspaces/{workspaceId}. Leave empty for self-hosted Prefect Server.",
       "type": "string"
     },
     "hostPort": {
       "title": "Host and Port",
-      "description": "Prefect Cloud API base URL.",
+      "description": "Prefect API base URL. For Prefect Cloud: https://api.prefect.cloud (default). For self-hosted Prefect Server: http://localhost:4200 or your server URL.",
       "type": "string",
       "default": "https://api.prefect.cloud"
     },
@@ -53,5 +53,5 @@
     }
   },
   "additionalProperties": false,
-  "required": ["apiKey", "accountId", "workspaceId"]
+  "required": ["apiKey"]
 }

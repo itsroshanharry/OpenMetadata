@@ -5,9 +5,7 @@ Ingests flows, deployments, run history, and lineage from Prefect Cloud.
 from __future__ import annotations
 
 import traceback
-from typing import Any, Iterable, List, Optional
-
-import httpx
+from typing import Iterable, List, Optional
 
 from metadata.generated.schema.api.data.createPipeline import CreatePipelineRequest
 from metadata.generated.schema.api.lineage.addLineage import AddLineageRequest
@@ -24,17 +22,14 @@ from metadata.generated.schema.entity.services.connections.pipeline.prefectConne
 from metadata.generated.schema.metadataIngestion.workflow import (
     Source as WorkflowSource,
 )
-from metadata.generated.schema.type.basic import (
-    FullyQualifiedEntityName,
-    SourceUrl,
-)
-from metadata.generated.schema.type.entityLineage import EntitiesEdge, LineageDetails
+from metadata.generated.schema.type.basic import FullyQualifiedEntityName, SourceUrl
+from metadata.generated.schema.type.entityLineage import EntitiesEdge
 from metadata.generated.schema.type.entityReference import EntityReference
 from metadata.generated.schema.type.tagLabel import (
-    TagLabel,
-    TagSource,
     LabelType,
     State,
+    TagLabel,
+    TagSource,
 )
 from metadata.ingestion.api.models import Either
 from metadata.ingestion.api.steps import InvalidSourceException
@@ -66,38 +61,54 @@ class PrefectSource(PipelineServiceSource):
         self.service_connection: PrefectConnection = (
             config.serviceConnection.root.config
         )
-        
-        # Build the Prefect API base URL using hostPort from config
-        host = getattr(self.service_connection, 'hostPort', None) or "https://api.prefect.cloud"
-        self.base_url = (
-            f"{host}/api/accounts"
-            f"/{self.service_connection.accountId}"
-            f"/workspaces/{self.service_connection.workspaceId}"
-        )
-        
+
+        # Build the Prefect API base URL
+        # Support both Prefect Cloud and self-hosted Prefect Server
+        if self.service_connection.accountId and self.service_connection.workspaceId:
+            # Prefect Cloud mode
+            host = (
+                getattr(self.service_connection, "hostPort", None)
+                or "https://api.prefect.cloud"
+            )
+            self.base_url = (
+                f"{host}/api/accounts"
+                f"/{self.service_connection.accountId}"
+                f"/workspaces/{self.service_connection.workspaceId}"
+            )
+        else:
+            # Self-hosted Prefect Server mode
+            host = (
+                getattr(self.service_connection, "hostPort", None)
+                or "http://localhost:4200"
+            )
+            self.base_url = f"{host}/api"
+
         # Handle both SecretStr and plain string for apiKey
         api_key = self.service_connection.apiKey
-        if hasattr(api_key, 'get_secret_value'):
+        if hasattr(api_key, "get_secret_value"):
             api_key_str = api_key.get_secret_value()
         else:
             api_key_str = str(api_key)
-        
+
         self.headers = {
             "Authorization": f"Bearer {api_key_str}",
             "Content-Type": "application/json",
-            "User-Agent": "OpenMetadata/Prefect-Connector"
+            "User-Agent": "OpenMetadata/Prefect-Connector",
         }
-        
+
         # Cache for deployments to avoid duplicate API calls
         self._deployments_cache = {}
-        
+
         # Now call parent __init__ which will call test_connection()
         super().__init__(config, metadata)
         self.source_config = self.config.sourceConfig.config
 
     @classmethod
     def create(
-        cls, config_dict: dict, metadata: OpenMetadata, pipeline_name: Optional[str] = None
+        cls,
+        config_dict: dict,
+        metadata: OpenMetadata,
+        pipeline_name: Optional[str] = None,
     ) -> "PrefectSource":
         config: WorkflowSource = WorkflowSource.parse_obj(config_dict)
         connection: PrefectConnection = config.serviceConnection.root.config
@@ -114,11 +125,11 @@ class PrefectSource(PipelineServiceSource):
             response = self.connection.post(
                 f"{self.base_url}/flows/filter",
                 headers=self.headers,
-                json={"limit": 200, "offset": 0}
+                json={"limit": 200, "offset": 0},
             )
             response.raise_for_status()
             flows = response.json()
-            
+
             # Warn if we hit the limit (possible truncation)
             if len(flows) >= 200:
                 logger.warning(
@@ -126,7 +137,7 @@ class PrefectSource(PipelineServiceSource):
                     "Some flows may not be ingested. Pagination support is "
                     "planned for a future release."
                 )
-            
+
             return flows
         except Exception as exc:
             logger.error(f"Failed to fetch flows: {exc}")
@@ -156,33 +167,29 @@ class PrefectSource(PipelineServiceSource):
         # Check cache first to avoid duplicate API calls
         if flow_id in self._deployments_cache:
             return self._deployments_cache[flow_id]
-        
+
         try:
             response = self.connection.post(
                 f"{self.base_url}/deployments/filter",
                 headers=self.headers,
                 json={
-                    "deployments": {
-                        "flow_id": {
-                            "any_": [flow_id]
-                        }
-                    },
+                    "deployments": {"flow_id": {"any_": [flow_id]}},
                     "limit": 50,
-                    "offset": 0
+                    "offset": 0,
                 },
             )
             response.raise_for_status()
             all_deps = response.json()
-            
+
             # Belt-and-suspenders: filter client-side too in case API filter doesn't work
             filtered = [d for d in all_deps if d.get("flow_id") == flow_id]
-            
+
             if len(filtered) != len(all_deps):
                 logger.debug(
                     f"API returned {len(all_deps)} deployments, "
                     f"filtered to {len(filtered)} for flow {flow_id}"
                 )
-            
+
             # Cache the result
             self._deployments_cache[flow_id] = filtered
             return filtered
@@ -203,71 +210,73 @@ class PrefectSource(PipelineServiceSource):
     def _parse_lineage_from_tags(self, tags: List[str]) -> tuple[List[str], List[str]]:
         """
         Extract source and destination table FQNs from Prefect flow tags.
-        
+
         Supports two tag formats:
         1. Prefixed format (recommended): 'om-source:db.schema.table' and 'om-destination:db.schema.table'
         2. Legacy format: 'source:db.schema.table' and 'destination:db.schema.table'
-        
+
         The prefixed format (om-*) is recommended to avoid conflicts with other tagging conventions.
-        
+
         Returns (source_fqns, destination_fqns)
         """
         sources = []
         destinations = []
-        
+
         for tag in tags or []:
             tag = tag.strip().lower()  # Normalize to lowercase for consistency
-            
+
             # Check for prefixed format first (recommended)
             if tag.startswith("om-source:"):
-                fqn = tag[len("om-source:"):]
+                fqn = tag[len("om-source:") :]
                 if fqn:  # Ensure FQN is not empty
                     sources.append(fqn)
             elif tag.startswith("om-destination:"):
-                fqn = tag[len("om-destination:"):]
+                fqn = tag[len("om-destination:") :]
                 if fqn:
                     destinations.append(fqn)
             # Fall back to legacy format for backward compatibility
             elif tag.startswith("source:"):
-                fqn = tag[len("source:"):]
+                fqn = tag[len("source:") :]
                 if fqn:
                     sources.append(fqn)
             elif tag.startswith("destination:"):
-                fqn = tag[len("destination:"):]
+                fqn = tag[len("destination:") :]
                 if fqn:
                     destinations.append(fqn)
-        
+
         # Remove duplicates while preserving order
         sources = list(dict.fromkeys(sources))
         destinations = list(dict.fromkeys(destinations))
-        
+
         return sources, destinations
 
     def _build_pipeline_status(self, flow_runs: List[dict]) -> List[PipelineStatus]:
         """Convert Prefect flow runs to OpenMetadata PipelineStatus."""
         from datetime import datetime
-        
+
         def parse_timestamp(ts_str: str) -> Optional[int]:
             """Convert ISO timestamp string to Unix timestamp (milliseconds)."""
             if not ts_str:
                 return None
             try:
-                dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
                 return int(dt.timestamp() * 1000)  # Convert to milliseconds
             except Exception:
                 return None
-        
+
         statuses = []
         for run in flow_runs:
             # In Prefect 3.x, use state_type (top-level) or state.type (nested)
-            state_type = run.get("state_type") or (run.get("state") or {}).get("type", "UNKNOWN")
+            state_type = run.get("state_type") or (run.get("state") or {}).get(
+                "type", "UNKNOWN"
+            )
             state_type = state_type.upper()
             om_status = PREFECT_STATE_MAP.get(state_type, StatusType.Failed)
 
             # Convert timestamps to Unix timestamps (milliseconds)
             start_time_str = run.get("start_time") or run.get("expected_start_time")
             end_time_str = run.get("end_time")
-            
+
             start_time = parse_timestamp(start_time_str)
             end_time = parse_timestamp(end_time_str)
 
@@ -287,7 +296,6 @@ class PrefectSource(PipelineServiceSource):
             statuses.append(pipeline_status)
         return statuses
 
-
     def yield_pipeline(self, flow: dict) -> Iterable[Either[CreatePipelineRequest]]:
         """
         Convert a Prefect flow into an OpenMetadata CreatePipelineRequest.
@@ -296,11 +304,11 @@ class PrefectSource(PipelineServiceSource):
             flow_id = flow["id"]
             flow_name = flow["name"]
             logger.info(f"Processing flow: {flow_name}")
-            
+
             # Get deployments to collect all tags
             deployments = self._get_deployments(flow_id)
             logger.debug(f"Found {len(deployments)} deployments for {flow_name}")
-            
+
             # Collect tags from both flow and deployments
             all_tags = self._get_all_tags(flow, deployments)
             logger.debug(f"Tags for {flow_name}: {all_tags}")
@@ -338,12 +346,14 @@ class PrefectSource(PipelineServiceSource):
 
             # Get the service FQN from context
             service_fqn = self.context.get().pipeline_service
-            
+
             create_request = CreatePipelineRequest(
                 name=flow_name,
                 displayName=flow_name,
                 description=description,
-                sourceUrl=SourceUrl(f"https://app.prefect.cloud/flow-runs?flow_id={flow_id}"),
+                sourceUrl=SourceUrl(
+                    f"https://app.prefect.cloud/flow-runs?flow_id={flow_id}"
+                ),
                 tasks=tasks or None,
                 tags=tag_labels if tag_labels else None,
                 service=FullyQualifiedEntityName(service_fqn),
@@ -382,20 +392,22 @@ class PrefectSource(PipelineServiceSource):
             # Get deployments to collect all tags
             flow_id = pipeline_details["id"]
             deployments = self._get_deployments(flow_id)
-            
+
             # Collect all tags from flow and deployments
             all_tags = self._get_all_tags(pipeline_details, deployments)
-            
+
             # Parse lineage from tags
             sources, destinations = self._parse_lineage_from_tags(all_tags)
-            
+
             if not sources and not destinations:
                 # No lineage tags found, skip silently (this is normal)
-                logger.debug(f"No lineage tags found for flow {pipeline_details['name']}")
+                logger.debug(
+                    f"No lineage tags found for flow {pipeline_details['name']}"
+                )
                 return
-            
+
             flow_name = pipeline_details["name"]
-            
+
             # Get the service FQN from context
             service_fqn = self.context.get().pipeline_service
             pipeline_fqn = f"{service_fqn}.{flow_name}"
@@ -410,6 +422,7 @@ class PrefectSource(PipelineServiceSource):
             # Create lineage edges for source tables
             for source_fqn in sources:
                 from metadata.generated.schema.entity.data.table import Table
+
                 source_table = self.metadata.get_by_name(entity=Table, fqn=source_fqn)
                 if source_table:
                     logger.info(f"Creating lineage: {source_fqn} -> {flow_name}")
@@ -426,11 +439,14 @@ class PrefectSource(PipelineServiceSource):
                         )
                     )
                 else:
-                    logger.debug(f"Source table not found in OpenMetadata: {source_fqn}")
+                    logger.debug(
+                        f"Source table not found in OpenMetadata: {source_fqn}"
+                    )
 
             # Create lineage edges for destination tables
             for dest_fqn in destinations:
                 from metadata.generated.schema.entity.data.table import Table
+
                 dest_table = self.metadata.get_by_name(entity=Table, fqn=dest_fqn)
                 if dest_table:
                     logger.info(f"Creating lineage: {flow_name} -> {dest_fqn}")
@@ -447,7 +463,9 @@ class PrefectSource(PipelineServiceSource):
                         )
                     )
                 else:
-                    logger.debug(f"Destination table not found in OpenMetadata: {dest_fqn}")
+                    logger.debug(
+                        f"Destination table not found in OpenMetadata: {dest_fqn}"
+                    )
 
         except Exception as exc:
             logger.warning(f"Failed to yield lineage: {exc}")
@@ -468,7 +486,7 @@ class PrefectSource(PipelineServiceSource):
 
     def close(self):
         """Close the HTTP client connection."""
-        if hasattr(self, 'connection') and self.connection:
+        if hasattr(self, "connection") and self.connection:
             self.connection.close()
 
     def test_connection(self) -> None:
@@ -476,8 +494,10 @@ class PrefectSource(PipelineServiceSource):
         Test connection to Prefect Cloud API.
         Validates API key, account ID, and workspace ID by attempting to fetch flows.
         """
-        from metadata.ingestion.source.pipeline.prefect.connection import test_connection
-        
+        from metadata.ingestion.source.pipeline.prefect.connection import (
+            test_connection,
+        )
+
         test_connection(
             self.metadata,
             self.connection,
