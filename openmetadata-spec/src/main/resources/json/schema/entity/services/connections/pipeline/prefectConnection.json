@@ -45,7 +45,19 @@
       "title": "Number of Status",
       "description": "Number of past flow run statuses to ingest per flow.",
       "type": "integer",
-      "default": 10
+      "default": 10,
+      "minimum": 1,
+      "maximum": 100
+    },
+    "verifySSL": {
+      "title": "Verify SSL",
+      "description": "Whether to verify SSL certificates when connecting to Prefect API. Set to false for self-signed certificates.",
+      "$ref": "../connectionBasicType.json#/definitions/verifySSL"
+    },
+    "sslConfig": {
+      "title": "SSL Configuration",
+      "description": "SSL Configuration for Prefect API connection.",
+      "$ref": "../../../../security/ssl/verifySSLConfig.json#/definitions/sslConfig"
     },
     "supportsMetadataExtraction": {
       "title": "Supports Metadata Extraction",

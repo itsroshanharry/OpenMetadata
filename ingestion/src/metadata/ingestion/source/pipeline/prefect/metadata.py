@@ -62,26 +62,21 @@ class PrefectSource(PipelineServiceSource):
             config.serviceConnection.root.config
         )
 
-        # Build the Prefect API base URL
-        # Support both Prefect Cloud and self-hosted Prefect Server
-        if self.service_connection.accountId and self.service_connection.workspaceId:
-            # Prefect Cloud mode
-            host = (
-                getattr(self.service_connection, "hostPort", None)
-                or "https://api.prefect.cloud"
+        # Validate accountId/workspaceId consistency
+        has_account = bool(self.service_connection.accountId)
+        has_workspace = bool(self.service_connection.workspaceId)
+        if has_account != has_workspace:
+            raise InvalidSourceException(
+                "Both accountId and workspaceId must be provided for "
+                "Prefect Cloud, or both must be empty for self-hosted mode."
             )
-            self.base_url = (
-                f"{host}/api/accounts"
-                f"/{self.service_connection.accountId}"
-                f"/workspaces/{self.service_connection.workspaceId}"
-            )
-        else:
-            # Self-hosted Prefect Server mode
-            host = (
-                getattr(self.service_connection, "hostPort", None)
-                or "http://localhost:4200"
-            )
-            self.base_url = f"{host}/api"
+
+        # Import and use shared base URL builder
+        from metadata.ingestion.source.pipeline.prefect.connection import (
+            _build_base_url,
+        )
+
+        self.base_url = _build_base_url(self.service_connection)
 
         # Handle both SecretStr and plain string for apiKey
         api_key = self.service_connection.apiKey
@@ -96,9 +91,6 @@ class PrefectSource(PipelineServiceSource):
             "User-Agent": "OpenMetadata/Prefect-Connector",
         }
 
-        # Cache for deployments to avoid duplicate API calls
-        self._deployments_cache = {}
-
         # Now call parent __init__ which will call test_connection()
         super().__init__(config, metadata)
         self.source_config = self.config.sourceConfig.config
@@ -110,7 +102,7 @@ class PrefectSource(PipelineServiceSource):
         metadata: OpenMetadata,
         pipeline_name: Optional[str] = None,
     ) -> "PrefectSource":
-        config: WorkflowSource = WorkflowSource.parse_obj(config_dict)
+        config: WorkflowSource = WorkflowSource.model_validate(config_dict)
         connection: PrefectConnection = config.serviceConnection.root.config
         if not isinstance(connection, PrefectConnection):
             raise InvalidSourceException(
@@ -119,26 +111,36 @@ class PrefectSource(PipelineServiceSource):
         return cls(config, metadata)
 
     def _get_flows(self) -> List[dict]:
-        """Fetch all flows from Prefect Cloud using POST /flows/filter."""
+        """Fetch all flows from Prefect Cloud using POST /flows/filter with pagination."""
+        all_flows = []
+        offset = 0
+        limit = 200  # Prefect API maximum per request
+
         try:
-            # Prefect API has a maximum limit of 200 per request
-            response = self.connection.post(
-                f"{self.base_url}/flows/filter",
-                headers=self.headers,
-                json={"limit": 200, "offset": 0},
-            )
-            response.raise_for_status()
-            flows = response.json()
-
-            # Warn if we hit the limit (possible truncation)
-            if len(flows) >= 200:
-                logger.warning(
-                    "Prefect API returned 200 flows (the maximum per request). "
-                    "Some flows may not be ingested. Pagination support is "
-                    "planned for a future release."
+            while True:
+                response = self.connection.post(
+                    f"{self.base_url}/flows/filter",
+                    headers=self.headers,
+                    json={"limit": limit, "offset": offset},
                 )
+                response.raise_for_status()
+                flows = response.json()
 
-            return flows
+                if not flows:
+                    break
+
+                all_flows.extend(flows)
+
+                # If we got fewer than limit, we've reached the end
+                if len(flows) < limit:
+                    break
+
+                offset += limit
+                logger.debug(f"Fetched {len(all_flows)} flows so far...")
+
+            logger.info(f"Fetched total of {len(all_flows)} flows")
+            return all_flows
+
         except Exception as exc:
             logger.error(f"Failed to fetch flows: {exc}")
             return []
@@ -163,11 +165,7 @@ class PrefectSource(PipelineServiceSource):
             return []
 
     def _get_deployments(self, flow_id: str) -> List[dict]:
-        """Fetch deployments for a specific flow (with caching)."""
-        # Check cache first to avoid duplicate API calls
-        if flow_id in self._deployments_cache:
-            return self._deployments_cache[flow_id]
-
+        """Fetch deployments for a specific flow."""
         try:
             response = self.connection.post(
                 f"{self.base_url}/deployments/filter",
@@ -190,8 +188,6 @@ class PrefectSource(PipelineServiceSource):
                     f"filtered to {len(filtered)} for flow {flow_id}"
                 )
 
-            # Cache the result
-            self._deployments_cache[flow_id] = filtered
             return filtered
         except Exception as exc:
             logger.warning(f"Failed to fetch deployments for flow {flow_id}: {exc}")
@@ -344,6 +340,21 @@ class PrefectSource(PipelineServiceSource):
                     )
                 )
 
+            # Build sourceUrl dynamically based on mode
+            if (
+                self.service_connection.accountId
+                and self.service_connection.workspaceId
+            ):
+                # Prefect Cloud mode
+                source_url = f"https://app.prefect.cloud/flow-runs?flow_id={flow_id}"
+            else:
+                # Self-hosted Prefect Server mode
+                host = (
+                    getattr(self.service_connection, "hostPort", None)
+                    or "http://localhost:4200"
+                )
+                source_url = f"{host}/flow-runs?flow_id={flow_id}"
+
             # Get the service FQN from context
             service_fqn = self.context.get().pipeline_service
 
@@ -351,9 +362,7 @@ class PrefectSource(PipelineServiceSource):
                 name=flow_name,
                 displayName=flow_name,
                 description=description,
-                sourceUrl=SourceUrl(
-                    f"https://app.prefect.cloud/flow-runs?flow_id={flow_id}"
-                ),
+                sourceUrl=SourceUrl(source_url),
                 tasks=tasks or None,
                 tags=tag_labels if tag_labels else None,
                 service=FullyQualifiedEntityName(service_fqn),

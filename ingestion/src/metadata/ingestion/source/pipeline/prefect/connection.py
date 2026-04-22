@@ -1,5 +1,16 @@
+#  Copyright 2025 Collate
+#  Licensed under the Collate Community License, Version 1.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#  https://github.com/open-metadata/OpenMetadata/blob/main/ingestion/LICENSE
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+
 """
-Connection test for Prefect Cloud
+Connection handler for Prefect
 """
 import httpx
 
@@ -11,25 +22,20 @@ from metadata.generated.schema.entity.services.connections.pipeline.prefectConne
 )
 from metadata.ingestion.connections.test_connections import test_connection_steps
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
+from metadata.utils.ssl_registry import get_verify_ssl_fn
 
 
-def get_connection(connection: PrefectConnection) -> httpx.Client:
+def _build_base_url(connection: PrefectConnection) -> str:
     """
-    Create an HTTP client for Prefect Cloud or self-hosted Prefect Server.
-    """
-    # Handle both SecretStr and plain string for apiKey
-    api_key = connection.apiKey
-    if hasattr(api_key, "get_secret_value"):
-        api_key_str = api_key.get_secret_value()
-    else:
-        api_key_str = str(api_key)
+    Build the Prefect API base URL based on connection mode.
 
-    # Use hostPort from config or default based on mode
-    # Support both Prefect Cloud and self-hosted Prefect Server
+    Returns:
+        Base URL for Prefect API (Cloud or self-hosted)
+    """
     if connection.accountId and connection.workspaceId:
         # Prefect Cloud mode
         host = getattr(connection, "hostPort", None) or "https://api.prefect.cloud"
-        base_url = (
+        return (
             f"{host}/api/accounts"
             f"/{connection.accountId}"
             f"/workspaces/{connection.workspaceId}"
@@ -37,14 +43,49 @@ def get_connection(connection: PrefectConnection) -> httpx.Client:
     else:
         # Self-hosted Prefect Server mode
         host = getattr(connection, "hostPort", None) or "http://localhost:4200"
-        base_url = f"{host}/api"
+        return f"{host}/api"
+
+
+def get_connection(connection: PrefectConnection) -> httpx.Client:
+    """
+    Create an HTTP client for Prefect Cloud or self-hosted Prefect Server.
+    """
+    # Validate accountId/workspaceId consistency
+    has_account = bool(connection.accountId)
+    has_workspace = bool(connection.workspaceId)
+    if has_account != has_workspace:
+        raise ValueError(
+            "Both accountId and workspaceId must be provided for "
+            "Prefect Cloud, or both must be empty for self-hosted mode."
+        )
+
+    # Handle both SecretStr and plain string for apiKey
+    api_key = connection.apiKey
+    if hasattr(api_key, "get_secret_value"):
+        api_key_str = api_key.get_secret_value()
+    else:
+        api_key_str = str(api_key)
+
+    # Build base URL using shared helper
+    base_url = _build_base_url(connection)
 
     headers = {
         "Authorization": f"Bearer {api_key_str}",
         "Content-Type": "application/json",
         "User-Agent": "OpenMetadata/Prefect-Connector",
     }
-    return httpx.Client(base_url=base_url, headers=headers, timeout=30)
+
+    # Handle SSL verification (required for enterprise deployments)
+    verify_ssl = True  # Default to verifying SSL for security
+    if connection.verifySSL:
+        verify_ssl_fn = get_verify_ssl_fn(connection.verifySSL)
+        verify_ssl = verify_ssl_fn(connection.sslConfig)
+        if verify_ssl is None:
+            verify_ssl = True  # Fallback to secure default
+
+    return httpx.Client(
+        base_url=base_url, headers=headers, timeout=30, verify=verify_ssl
+    )
 
 
 def test_connection(
