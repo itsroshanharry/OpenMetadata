@@ -79,9 +79,9 @@ def get_connection(connection: PrefectConnection) -> httpx.Client:
     verify_ssl = True  # Default to verifying SSL for security
     if connection.verifySSL:
         verify_ssl_fn = get_verify_ssl_fn(connection.verifySSL)
-        verify_ssl = verify_ssl_fn(connection.sslConfig)
-        if verify_ssl is None:
-            verify_ssl = True  # Fallback to secure default
+        ssl_result = verify_ssl_fn(connection.sslConfig)
+        # None (no-ssl) and False (ignore) both mean disable verification
+        verify_ssl = ssl_result if ssl_result is not None else False
 
     return httpx.Client(
         base_url=base_url, headers=headers, timeout=30, verify=verify_ssl

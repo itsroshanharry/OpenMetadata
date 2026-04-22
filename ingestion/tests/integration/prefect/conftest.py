@@ -89,6 +89,11 @@ def om_config(prefect_server: str) -> dict:
     """
     OpenMetadata workflow configuration for Prefect connector.
     """
+    # Get JWT token from environment variable
+    om_jwt = os.environ.get("OM_JWT")
+    if not om_jwt:
+        pytest.skip("OM_JWT environment variable not set")
+
     return {
         "source": {
             "type": "prefect",
@@ -110,12 +115,7 @@ def om_config(prefect_server: str) -> dict:
                     "OM_HOST_PORT", "http://host.docker.internal:8585/api"
                 ),
                 "authProvider": "openmetadata",
-                "securityConfig": {
-                    "jwtToken": os.environ.get(
-                        "OM_JWT",
-                        "eyJraWQiOiJHYjM4OWEtOWY3Ni1nZGpzLWE5MmotMDI0MmJrOTQzNTYiLCJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhZG1pbiIsImlzQm90IjpmYWxzZSwiaXNzIjoib3Blbi1tZXRhZGF0YS5vcmciLCJpYXQiOjE2NjM5Mzg0NjIsImVtYWlsIjoiYWRtaW5Ab3Blbm1ldGFkYXRhLm9yZyJ9.tS8um_5DKu7HgzGBzS1VTA5uUjKWOCU0B_j08WXBiEC0mr0zNREkqVfwFDD-d24HlNEbrqioLsBuFRiwIWKc1m_ZlVQbG7P36RUxhuv2vbSp80FKyNM-Tj93FDzq91jsyNmsQhyNv_fNr3TXfzzSPjHt8Go0FMMP66weoKMgW2PbXlhVKwEuXUHyakLLzewm9UMeQaEiRzhiTMU3UkLXcKbYEJJvfNFcLwSl9W8JCO_l0Yj3ud-qt_nQYEZwqW6u5nfdQllN133iikV4fM5QZsMCnm8Rq1mvLR0y9bmJiD7fwM1tmJ791TUWqmKaTnP49U493VanKpUAfzIiOiIbhg",
-                    )
-                },
+                "securityConfig": {"jwtToken": om_jwt},
             }
         },
     }

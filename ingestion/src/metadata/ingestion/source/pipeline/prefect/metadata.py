@@ -35,6 +35,7 @@ from metadata.ingestion.api.models import Either
 from metadata.ingestion.api.steps import InvalidSourceException
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 from metadata.ingestion.source.pipeline.pipeline_service import PipelineServiceSource
+from metadata.ingestion.source.pipeline.prefect.connection import _build_base_url
 from metadata.utils.logger import ingestion_logger
 
 logger = ingestion_logger()
@@ -71,11 +72,7 @@ class PrefectSource(PipelineServiceSource):
                 "Prefect Cloud, or both must be empty for self-hosted mode."
             )
 
-        # Import and use shared base URL builder
-        from metadata.ingestion.source.pipeline.prefect.connection import (
-            _build_base_url,
-        )
-
+        # Use shared base URL builder
         self.base_url = _build_base_url(self.service_connection)
 
         # Handle both SecretStr and plain string for apiKey
