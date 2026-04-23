@@ -51,8 +51,9 @@
     },
     "verifySSL": {
       "title": "Verify SSL",
-      "description": "Whether to verify SSL certificates when connecting to Prefect API. Set to false for self-signed certificates.",
-      "$ref": "../connectionBasicType.json#/definitions/verifySSL"
+      "description": "Client SSL verification. Make sure to configure the SSLConfig if enabled.",
+      "$ref": "../../../../security/ssl/verifySSLConfig.json#/definitions/verifySSL",
+      "default": "no-ssl"
     },
     "sslConfig": {
       "title": "SSL Configuration",
