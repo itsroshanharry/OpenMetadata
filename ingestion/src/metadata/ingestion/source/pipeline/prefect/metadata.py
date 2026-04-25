@@ -479,11 +479,12 @@ class PrefectSource(PipelineServiceSource):
     def get_pipelines_list(self) -> Iterable[dict]:
         """Producer: returns list of all Prefect flows."""
         logger.info("Fetching flows from Prefect Cloud...")
-        flows = self._get_flows()
-        logger.info(f"Found {len(flows)} flows")
-        for flow in flows:
+        count = 0
+        for flow in self._get_flows():
             logger.debug(f"Flow: {flow.get('name')} (ID: {flow.get('id')})")
-        return flows
+            count += 1
+            yield flow
+        logger.info(f"Found {count} flows")
 
     def get_pipeline_name(self, pipeline_details: dict) -> str:
         """Return the flow name to use as pipeline name."""
