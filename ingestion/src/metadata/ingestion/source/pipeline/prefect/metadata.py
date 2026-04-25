@@ -107,9 +107,11 @@ class PrefectSource(PipelineServiceSource):
             )
         return cls(config, metadata)
 
-    def _get_flows(self) -> List[dict]:
-        """Fetch all flows from Prefect Cloud using POST /flows/filter with pagination."""
-        all_flows = []
+    def _get_flows(self) -> Iterable[dict]:
+        """
+        Fetch flows from Prefect using pagination with generator pattern.
+        Yields flows one at a time to avoid loading all flows into memory.
+        """
         offset = 0
         limit = 200  # Prefect API maximum per request
 
@@ -126,21 +128,18 @@ class PrefectSource(PipelineServiceSource):
                 if not flows:
                     break
 
-                all_flows.extend(flows)
+                # Yield each flow individually instead of accumulating
+                yield from flows
 
                 # If we got fewer than limit, we've reached the end
                 if len(flows) < limit:
                     break
 
                 offset += limit
-                logger.debug(f"Fetched {len(all_flows)} flows so far...")
-
-            logger.info(f"Fetched total of {len(all_flows)} flows")
-            return all_flows
 
         except Exception as exc:
             logger.error(f"Failed to fetch flows: {exc}")
-            return []
+            logger.debug(traceback.format_exc())
 
     def _get_flow_runs(self, flow_id: str) -> List[dict]:
         """Fetch recent run history for a specific flow."""
