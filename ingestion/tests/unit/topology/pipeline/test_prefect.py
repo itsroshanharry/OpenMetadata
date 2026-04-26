@@ -103,7 +103,7 @@ class TestPrefectSource(unittest.TestCase):
         mock_get_connection.return_value = mock_client
 
         source = PrefectSource(self.workflow_config, self.mock_metadata)
-        flows = source.get_pipelines_list()
+        flows = list(source.get_pipelines_list())
 
         self.assertEqual(len(flows), 2)
         self.assertEqual(flows[0]["name"], "test-flow")
@@ -132,7 +132,7 @@ class TestPrefectSource(unittest.TestCase):
         results = list(source.yield_pipeline(MOCK_FLOWS[0]))
 
         self.assertEqual(len(results), 1)
-        self.assertTrue(results[0].right is not None)
+        self.assertIsNotNone(results[0].right)
 
         pipeline_req = results[0].right
         self.assertEqual(pipeline_req.name.root, "test-flow")
@@ -168,14 +168,14 @@ class TestPrefectSource(unittest.TestCase):
         self.assertEqual(len(results), 2)
 
         # Check first status (COMPLETED)
-        self.assertTrue(results[0].right is not None)
+        self.assertIsNotNone(results[0].right)
         status1 = results[0].right
         self.assertEqual(status1.executionStatus.value, "Successful")
         self.assertIsNotNone(status1.timestamp)
         self.assertEqual(len(status1.taskStatus), 1)
 
         # Check second status (FAILED)
-        self.assertTrue(results[1].right is not None)
+        self.assertIsNotNone(results[1].right)
         status2 = results[1].right
         self.assertEqual(status2.executionStatus.value, "Failed")
 
